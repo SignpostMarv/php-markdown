@@ -1776,7 +1776,7 @@ class MarkdownExtra_Parser extends Markdown_Parser {
 			"stripFootnotes"     => 15,
 			"stripAbbreviations" => 25,
 			"appendFootnotes"    => 50,
-            "doTOC"              => 55,
+			"doTOC"              => 55,
 			);
 		$this->block_gamut += array(
 			"doFencedCodeBlocks" => 5,
