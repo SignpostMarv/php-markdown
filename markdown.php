@@ -1,5 +1,9 @@
 <?php
 #
+# Markdown Extra Math - PHP Markdown Extra with additional syntax for jsMath equations
+# Copyright (c) 2008-2009 Dr. Drang
+# <http://www.leancrew.com/all-this/>
+#
 # Markdown Extra  -  A text-to-HTML conversion tool for web writers
 #
 # PHP Markdown & Extra
@@ -33,6 +37,9 @@ define( 'MARKDOWNEXTRA_VERSION',  "1.2.5" ); # Sun 8 Jan 2012
 # Optional class attribute for footnote links and backlinks.
 @define( 'MARKDOWN_FN_LINK_CLASS',         "" );
 @define( 'MARKDOWN_FN_BACKLINK_CLASS',     "" );
+
+# Change to "jsmath" for jsMath output.
+@define( 'MARKDOWN_MATH_TYPE',      "mathjax" );
 
 
 #
@@ -628,7 +635,7 @@ class Markdown_Parser {
 	# These are all the transformations that occur *within* block-level
 	# tags like paragraphs, headers, and list items.
 	#
-		# Process character escapes, code spans, and inline HTML
+		# Process character escapes, code spans, math, and inline HTML
 		# in one shot.
 		"parseSpan"           => -30,
 
@@ -1130,6 +1137,34 @@ class Markdown_Parser {
 		return "\n\n".$this->hashBlock($codeblock)."\n\n";
 	}
 
+  function doDisplayMath($text) {
+  #
+  # Wrap text between \[ and \] in display math tags.
+  #
+    $text = preg_replace_callback('{
+      ^\\\\         # line starts with a single backslash (double escaping)
+      \[            # followed by a square bracket
+      (.+)          # then the actual LaTeX code
+      \\\\          # followed by another backslash
+      \]            # and closing bracket
+      \s*$          # and maybe some whitespace before the end of the line
+      }mx',
+      array(&$this, '_doDisplayMath_callback'), $text);
+      
+    return $text;
+  }
+  function _doDisplayMath_callback($matches) {
+    $texblock = $matches[1];
+    # $texblock = htmlspecialchars(trim($texblock), ENT_NOQUOTES);
+    $texblock = trim($texblock);
+    if (MARKDOWN_MATH_TYPE == "mathjax") {
+      $texblock = "<span class=\"MathJax_Preview\">[$texblock]</span><script type=\"math/tex; mode=display\">$texblock</script>";
+    } else {
+		  $texblock = "<div class=\"math\">$texblock</div>";
+	  }
+		return "\n\n".$this->hashBlock($texblock)."\n\n";
+	}
+    
 
 	function makeCodeSpan($code) {
 	#
@@ -1139,6 +1174,20 @@ class Markdown_Parser {
 		return $this->hashPart("<code>$code</code>");
 	}
 
+  function makeInlineMath($tex) {
+	#
+	# Create a code span markup for $tex. Called from handleSpanToken.
+	#
+    # $tex = htmlspecialchars(trim($tex), ENT_NOQUOTES);
+    $tex = trim($tex);
+		if (MARKDOWN_MATH_TYPE == "mathjax") {
+		  return $this->hashPart("<span class=\"MathJax_Preview\">[$tex]</span><script type=\"math/tex\">$tex</script>");
+	  } else {
+		  return $this->hashPart("<span type=\"math\">$tex</span>");
+	  }
+	}
+
+	
 
 	var $em_relist = array(
 		''  => '(?:(?<!\*)\*(?!\*)|(?<!_)_(?!_))(?=\S|$)(?![\.,:;]\s)',
@@ -1523,7 +1572,7 @@ class Markdown_Parser {
 	function parseSpan($str) {
 	#
 	# Take the string $str and parse it into tokens, hashing embeded HTML,
-	# escaped characters and handling code spans.
+	# escaped characters and handling code and math spans.
 	#
 		$output = '';
 		
@@ -1533,6 +1582,8 @@ class Markdown_Parser {
 				|
 					(?<![`\\\\])
 					`+						# code span marker
+				|
+				  \\ \(         # inline math
 			'.( $this->no_markup ? '' : '
 				|
 					<!--    .*?     -->		# comment
@@ -1583,7 +1634,26 @@ class Markdown_Parser {
 	#
 		switch ($token{0}) {
 			case "\\":
-				return $this->hashPart("&#". ord($token{1}). ";");
+				if ($token{1} == "(") {
+			    #echo "$token\n";
+			    #echo "$str\n\n";
+			    $texend = strpos($str, '\\)');
+			    #echo "$texend\n";
+			    if ($texend) {
+			      $eqn = substr($str, 0, $texend);
+			      $str = substr($str, $texend+2);
+			      #echo "$eqn\n";
+			      #echo "$str\n";
+			      $texspan = $this->makeInlineMath($eqn);
+			      return $this->hashPart($texspan);
+		      }
+		      else {
+		        return $str;
+	        }
+			  }
+			  else {
+				  return $this->hashPart("&#". ord($token{1}). ";");
+			  }
 			case "`":
 				# Search for end marker in remaining text.
 				if (preg_match('/^(.*?[^`])'.preg_quote($token).'(?!`)(.*)$/sm', 
@@ -1711,6 +1781,7 @@ class MarkdownExtra_Parser extends Markdown_Parser {
 			"doFencedCodeBlocks" => 5,
 			"doTables"           => 15,
 			"doDefLists"         => 45,
+			"doDisplayMath"      => 55,
 			);
 		$this->span_gamut += array(
 			"doFootnotes"        => 5,
