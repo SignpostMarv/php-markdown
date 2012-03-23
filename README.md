@@ -1,3 +1,25 @@
+# PHP-Markdown-Extra on github
+
+This project is derive form [jtopjian's php-markdown-extra][] and the original project at [michelf's origin][].
+
+The purpose of I fork here is that I just want to use the feature of TOC. And I searched on google that [jtopjian's php-markdown-extra] has done that already, but his code is not holden on github. So I copied his code here, and made some improvement for supporting automatic generated anchor link of TOC.
+
+The TOC usage like this:
+
+	[TOC]
+
+add this tag into anywhere you want, then the compiled page should contain the table of content of your document.
+
+You can fork this for extending more features or use the origin from the authors' project page.
+
+[jtopjian's php-markdown-extra]: https://bitbucket.org/jtopjian/php-markdown-extra/
+
+[michelf's origin]: http://michelf.com/projects/php-markdown/extra/
+
+
+
+# Math
+
 PHP Markdown Extra Math is an extension of Michel Fortin's [PHP Markdown Extra][1], a PHP script for converting text written in [Markdown][2] to HTML. The extension consist of adding support for mathematical equations written in LaTeX to be processed by either the [MathJax][4] (default) or [jsMath][3] math rendering libraries.
 
 ## Use ##
@@ -66,3 +88,4 @@ PHP Markdown Extra Math is licensed under the same terms as PHP Markdown Extra. 
 [3]: http://www.math.union.edu/~dpvc/jsMath/
 [4]: http://www.mathjax.org/
 [5]: http://www.mathjax.org/resources/docs/?options/hub.html
+
