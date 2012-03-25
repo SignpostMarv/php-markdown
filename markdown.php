@@ -241,6 +241,8 @@ class Markdown_Parser {
 	# Change to `true` to disallow markup or entities.
 	public $no_markup = false;
 	public $no_entities = false;
+
+	public $nl2br = false;
 	
 	# Predefined urls and titles for reference links and images.
 	var $predef_urls = array();
@@ -2698,6 +2700,8 @@ class MarkdownExtra_Parser extends Markdown_Parser {
 			$is_p = !preg_match('/^B\x1A[0-9]+B|^C\x1A[0-9]+C$/', $value);
 			
 			if ($is_p) {
+				if($this->nl2br)
+					$value = nl2br($value);	
 				$value = "<p>$value</p>";
 			}
 			$grafs[$key] = $value;
