@@ -56,15 +56,16 @@ define( 'MARKDOWNEXTRA_VERSION',  "1.2.5" ); # Sun 8 Jan 2012
 
 @define( 'MARKDOWN_PARSER_CLASS',  'MarkdownExtra_Parser' );
 
-function Markdown($text) {
+function Markdown($text, $options=array()) {
 #
 # Initialize the parser and return the result of its transform method.
 #
-	# Setup static parser variable.
-	static $parser;
-	if (!isset($parser)) {
-		$parser_class = MARKDOWN_PARSER_CLASS;
-		$parser = new $parser_class;
+	$parser_class = MARKDOWN_PARSER_CLASS;
+	$parser = new $parser_class;
+
+	//set parameters
+	foreach($options as $key=>$val) {
+		$parser->$key = $val;
 	}
 
 	# Transform text using parser.
@@ -223,23 +224,23 @@ class Markdown_Parser {
 
 	# Regex to match balanced [brackets].
 	# Needed to insert a maximum bracked depth while converting to PHP.
-	var $nested_brackets_depth = 6;
-	var $nested_brackets_re;
+	public $nested_brackets_depth = 6;
+	public $nested_brackets_re;
 	
-	var $nested_url_parenthesis_depth = 4;
-	var $nested_url_parenthesis_re;
+	public $nested_url_parenthesis_depth = 4;
+	public $nested_url_parenthesis_re;
 
 	# Table of hash values for escaped characters:
-	var $escape_chars = '\`*_{}[]()>#+-.!';
-	var $escape_chars_re;
+	public $escape_chars = '\`*_{}[]()>#+-.!';
+	public $escape_chars_re;
 
 	# Change to ">" for HTML output.
-	var $empty_element_suffix = MARKDOWN_EMPTY_ELEMENT_SUFFIX;
-	var $tab_width = MARKDOWN_TAB_WIDTH;
+	public $empty_element_suffix = MARKDOWN_EMPTY_ELEMENT_SUFFIX;
+	public $tab_width = MARKDOWN_TAB_WIDTH;
 	
 	# Change to `true` to disallow markup or entities.
-	var $no_markup = false;
-	var $no_entities = false;
+	public $no_markup = false;
+	public $no_entities = false;
 	
 	# Predefined urls and titles for reference links and images.
 	var $predef_urls = array();
@@ -249,7 +250,6 @@ class Markdown_Parser {
 	function Markdown_Parser() {
 	#
 	# Constructor function. Initialize appropriate member variables.
-	#
 		$this->_initDetab();
 		$this->prepareItalicsAndBold();
 	
