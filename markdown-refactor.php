@@ -263,6 +263,135 @@ namespace Markdown{
 			$this->titles = null;
 			$this->html_hashes = null;
 		}
+
+		private function stripLinkDefinitions($text) {
+		#
+		# Strips link definitions from text, stores the URLs and titles in
+		# hash references.
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'] - 1;
+
+			# Link defs are in the form: ^[id]: url "optional title"
+			$text = preg_replace_callback('{
+								^[ ]{0,'.$less_than_tab.'}\[(.+)\][ ]?:	# id = $1
+								  [ ]*
+								  \n?				# maybe *one* newline
+								  [ ]*
+								(?:
+								  <(.+?)>			# url = $2
+								|
+								  (\S+?)			# url = $3
+								)
+								  [ ]*
+								  \n?				# maybe one newline
+								  [ ]*
+								(?:
+									(?<=\s)			# lookbehind for whitespace
+									["(]
+									(.*?)			# title = $4
+									[")]
+									[ ]*
+								)?	# title is optional
+								(?:\n+|\Z)
+				}xm',
+				array($this, 'stripLinkDefinitions_callback'),
+				$text
+			);
+			return $text;
+		}
+
+		private stripLinkDefinitions_callback($matches) {
+			$link_id = strtolower($matches[1]);
+			$url = $matches[2] == '' ? $matches[3] : $matches[2];
+			$this->urls[$link_id] = $url;
+			$this->titles[$link_id] =& $matches[4];
+			return ''; # String that will replace the block
+		}
+
+		private function runBasicBlockGamut($text){
+		#
+		# Run block gamut tranformations, without hashing HTML blocks. This is 
+		# useful when HTML blocks are known to be already hashed, like in the first
+		# whole-document pass.
+		#
+			foreach (static::$block_gamut as $method => $priority) {
+				$text = call_user_func_array(array($this, $method), array($text));
+			}
+			
+			# Finally form paragraph and restore hashed blocks.
+			$text = $this->formParagraphs($text);
+
+			return $text;
+		}
+
+		private function formParagraphs($text) {
+		#
+		#	Params:
+		#		$text - string to process with html <p> tags
+		#
+			# Strip leading and trailing lines:
+			$text = preg_replace('/\A\n+|\n+\z/', '', $text);
+
+			$grafs = preg_split('/\n{2,}/', $text, -1, PREG_SPLIT_NO_EMPTY);
+
+			#
+			# Wrap <p> tags and unhashify HTML blocks
+			#
+			foreach ($grafs as $key => $value) {
+				if (!preg_match('/^B\x1A[0-9]+B$/', $value)) {
+					# Is a paragraph.
+					$value = $this->runSpanGamut($value);
+					$value = preg_replace('/^([ ]*)/', "<p>", $value);
+					$value .= "</p>";
+					$grafs[$key] = $this->unhash($value);
+				}
+				else {
+					# Is a block.
+					# Modify elements of @grafs in-place...
+					$graf = $value;
+					$block = $this->html_hashes[$graf];
+					$graf = $block;
+	//				if (preg_match('{
+	//					\A
+	//					(							# $1 = <div> tag
+	//					  <div  \s+
+	//					  [^>]*
+	//					  \b
+	//					  markdown\s*=\s*  ([\'"])	#	$2 = attr quote char
+	//					  1
+	//					  \2
+	//					  [^>]*
+	//					  >
+	//					)
+	//					(							# $3 = contents
+	//					.*
+	//					)
+	//					(</div>)					# $4 = closing tag
+	//					\z
+	//					}xs', $block, $matches))
+	//				{
+	//					list(, $div_open, , $div_content, $div_close) = $matches;
+	//
+	//					# We can't call Markdown(), because that resets the hash;
+	//					# that initialization code should be pulled into its own sub, though.
+	//					$div_content = $this->hashHTMLBlocks($div_content);
+	//					
+	//					# Run document gamut methods on the content.
+	//					foreach ($this->document_gamut as $method => $priority) {
+	//						$div_content = $this->$method($div_content);
+	//					}
+	//
+	//					$div_open = preg_replace(
+	//						'{\smarkdown\s*=\s*([\'"]).+?\1}', '', $div_open);
+	//
+	//					$graf = $div_open . "\n" . $div_content . "\n" . $div_close;
+	//				}
+					$grafs[$key] = $graf;
+				}
+			}
+
+			return implode("\n\n", $grafs);
+		}
 	}
 
 	class Parser implements iMarkdown_Parser{
