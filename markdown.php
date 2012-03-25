@@ -31,8 +31,8 @@ define( 'MARKDOWNEXTRA_VERSION',  "1.2.5" ); # Sun 8 Jan 2012
 @define( 'MARKDOWN_TAB_WIDTH',     4 );
 
 # Optional title attribute for footnote links and backlinks.
-@define( 'MARKDOWN_FN_LINK_TITLE',         "" );
-@define( 'MARKDOWN_FN_BACKLINK_TITLE',     "" );
+@define( 'MARKDOWN_FN_LINK_TITLE',         "Go to footnote %%" );
+@define( 'MARKDOWN_FN_BACKLINK_TITLE',     "Go back to footnote %%" );
 
 # Optional class attribute for footnote links and backlinks.
 @define( 'MARKDOWN_FN_LINK_CLASS',         "" );
@@ -413,6 +413,7 @@ class Markdown_Parser {
 		#
 		$block_tags_a_re = 'ins|del';
 		$block_tags_b_re = 'p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|address|'.
+						   'section|article|audio|video|canvas|'.
 						   'script|noscript|form|fieldset|iframe|math|textarea';
 
 		# Regular expression for the content of a block tag.
@@ -1839,7 +1840,7 @@ class MarkdownExtra_Parser extends Markdown_Parser {
 	### HTML Block Parser ###
 	
 	# Tags that are always treated as block tags:
-	var $block_tags_re = 'p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|address|form|fieldset|iframe|hr|legend';
+  var $block_tags_re = 'p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|address|form|fieldset|iframe|hr|legend|aside|section|header|nav|article|footer|hgroup|figure|audio|video|canvas';
 	
 	# Tags treated as block tags only if the opening tag is alone on it's line:
 	var $context_block_tags_re = 'script|noscript|math|ins|del';
