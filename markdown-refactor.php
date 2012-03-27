@@ -1843,7 +1843,7 @@ namespace Markdown{
 			return array($parsed, $text);
 		}
 
-		private function hashHTMLBlocks_inHTML($text, $hash_method, $md_attr) {
+		private function hashHTMLBlocks_inHTML($text, $hash_method, $md_attr){
 		#
 		# Parse HTML, calling _HashHTMLBlocks_InMarkdown for block tags.
 		#
@@ -1938,7 +1938,7 @@ namespace Markdown{
 				# Check for: Auto-close tag (like <hr/>)
 				#			 Comments and Processing Instructions.
 				#
-				if (preg_match('{^</?(?:'.$this->auto_close_tags_re.')\b}', $tag) ||
+				if (preg_match('{^</?(?:'.static::auto_close_tags_re.')\b}', $tag) ||
 					$tag{1} == '!' || $tag{1} == '?')
 				{
 					# Just add the tag to the block as if it was text.
@@ -1971,8 +1971,7 @@ namespace Markdown{
 						
 						# Calculate indent before tag.
 						if (preg_match('/(?:^|\n)( *?)(?! ).*?$/', $block_text, $matches)) {
-							$strlen = $this->utf8_strlen;
-							$indent = $strlen($matches[1], 'UTF-8');
+							$indent = static::utf8_strlen($matches[1]);
 						} else {
 							$indent = 0;
 						}
@@ -2014,6 +2013,643 @@ namespace Markdown{
 			
 			return array($parsed, $text);
 		}
-	} 
+
+		private function hashClean($text){
+		#
+		# Called whenever a tag must be hashed when a function insert a "clean" tag
+		# in $text, it pass through this function and is automaticaly escaped, 
+		# blocking invalid nested overlap.
+		#
+			return $this->hashPart($text, 'C');
+		}
+
+
+		protected function doFencedCodeBlocks($text) {
+		#
+		# Adding the fenced code block syntax to regular Markdown:
+		#
+		# ~~~
+		# Code block
+		# ~~~
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'];
+			
+			$text = preg_replace_callback('{
+					(?:\n|\A)
+					# 1: Opening marker
+					(
+						~{3,} # Marker: three tilde or more.
+					)
+					[ ]* \n # Whitespace and newline following marker.
+					
+					# 2: Content
+					(
+						(?>
+							(?!\1 [ ]* \n)	# Not a closing marker.
+							.*\n+
+						)+
+					)
+					
+					# Closing marker.
+					\1 [ ]* \n
+				}xm',
+				array($this, 'doFencedCodeBlocks_callback'), $text);
+
+			return $text;
+		}
+
+		private function doFencedCodeBlocks_callback($matches) {
+			$codeblock = $matches[2];
+			$codeblock = htmlspecialchars($codeblock, ENT_NOQUOTES);
+			$codeblock = preg_replace_callback('/^\n+/',
+				array($this, 'doFencedCodeBlocks_newlines'), $codeblock);
+			$codeblock = "<pre><code>$codeblock</code></pre>";
+			return "\n\n".$this->hashBlock($codeblock)."\n\n";
+		}
+
+		private function doFencedCodeBlocks_newlines($matches) {
+			return str_repeat('<br' . $this->config['EMPTY_ELEMENT_SUFFIX'], strlen($matches[0]));
+		}
+
+
+		protected function stripFootnotes($text) {
+		#
+		# Strips link definitions from text, stores the URLs and titles in
+		# hash references.
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'] - 1;
+
+			# Link defs are in the form: [^id]: url "optional title"
+			$text = preg_replace_callback('{
+				^[ ]{0,'.$less_than_tab.'}\[\^(.+?)\][ ]?:	# note_id = $1
+				  [ ]*
+				  \n?					# maybe *one* newline
+				(						# text = $2 (no blank lines allowed)
+					(?:					
+						.+				# actual text
+					|
+						\n				# newlines but 
+						(?!\[\^.+?\]:\s)# negative lookahead for footnote marker.
+						(?!\n+[ ]{0,3}\S)# ensure line is not blank and followed 
+										# by non-indented content
+					)*
+				)		
+				}xm',
+				array($this, 'stripFootnotes_callback'),
+				$text);
+			return $text;
+		}
+
+		private function stripFootnotes_callback($matches) {
+			$note_id = $this->fn_id_prefix . $matches[1];
+			$this->footnotes[$note_id] = $this->outdent($matches[2]);
+			return ''; # String that will replace the block
+		}
+
+
+		protected function stripAbbreviations($text) {
+		#
+		# Strips abbreviations from text, stores titles in hash references.
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'] - 1;
+
+			# Link defs are in the form: [id]*: url "optional title"
+			$text = preg_replace_callback('{
+				^[ ]{0,'.$less_than_tab.'}\*\[(.+?)\][ ]?:	# abbr_id = $1
+				(.*)					# text = $2 (no blank lines allowed)	
+				}xm',
+				array($this, 'stripAbbreviations_callback'),
+				$text);
+			return $text;
+		}
+
+		private function stripAbbreviations_callback($matches) {
+			$abbr_word = $matches[1];
+			$abbr_desc = $matches[2];
+			if ($this->abbr_word_re != ''){
+				$this->abbr_word_re .= '|';
+			}
+			$this->abbr_word_re .= preg_quote($abbr_word);
+			$this->abbr_desciptions[$abbr_word] = trim($abbr_desc);
+			return ''; # String that will replace the block
+		}
+
+		protected function appendFootnotes($text) {
+		#
+		# Append footnote list to text.
+		#
+			$text = preg_replace_callback('{F\x1Afn:(.*?)\x1A:}', 
+				array($this, 'appendFootnotes_callback'), $text);
+		
+			if (!empty($this->footnotes_ordered)) {
+				$text .= "\n\n";
+				$text .= "<div class=\"footnotes\">\n";
+				$text .= "<hr". $this->empty_element_suffix ."\n";
+				$text .= "<ol>\n\n";
+				
+				$attr = " rev=\"footnote\"";
+				if ($this->fn_backlink_class != "") {
+					$class = $this->fn_backlink_class;
+					$class = $this->encodeAttribute($class);
+					$attr .= " class=\"$class\"";
+				}
+				if ($this->fn_backlink_title != "") {
+					$title = $this->fn_backlink_title;
+					$title = $this->encodeAttribute($title);
+					$attr .= " title=\"$title\"";
+				}
+				$num = 0;
+				
+				while (!empty($this->footnotes_ordered)) {
+					$footnote = reset($this->footnotes_ordered);
+					$note_id = key($this->footnotes_ordered);
+					unset($this->footnotes_ordered[$note_id]);
+					
+					$footnote .= "\n"; # Need to append newline before parsing.
+					$footnote = $this->runBlockGamut("$footnote\n");				
+					$footnote = preg_replace_callback('{F\x1Afn:(.*?)\x1A:}', 
+						array($this, 'appendFootnotes_callback'), $footnote);
+					
+					$attr = str_replace("%%", ++$num, $attr);
+					$note_id = $this->encodeAttribute($note_id);
+					
+					# Add backlink to last paragraph; create new paragraph if needed.
+					$backlink = "<a href=\"#fnref:$note_id\"$attr>&#8617;</a>";
+					if (preg_match('{</p>$}', $footnote)) {
+						$footnote = substr($footnote, 0, -4) . "&#160;$backlink</p>";
+					} else {
+						$footnote .= "\n\n<p>$backlink</p>";
+					}
+					
+					$text .= "<li id=\"fn:$note_id\">\n";
+					$text .= $footnote . "\n";
+					$text .= "</li>\n\n";
+				}
+				
+				$text .= "</ol>\n";
+				$text .= "</div>";
+			}
+			return $text;
+		}
+
+		private function appendFootnotes_callback($matches) {
+			$node_id = $this->fn_id_prefix . $matches[1];
+			
+			# Create footnote marker only if it has a corresponding footnote *and*
+			# the footnote hasn't been used by another marker.
+			if (isset($this->footnotes[$node_id])) {
+				# Transfert footnote content to the ordered list.
+				$this->footnotes_ordered[$node_id] = $this->footnotes[$node_id];
+				unset($this->footnotes[$node_id]);
+				
+				$num = $this->footnote_counter++;
+				$attr = " rel=\"footnote\"";
+				if ($this->fn_link_class != "") {
+					$class = $this->fn_link_class;
+					$class = $this->encodeAttribute($class);
+					$attr .= " class=\"$class\"";
+				}
+				if ($this->fn_link_title != "") {
+					$title = $this->fn_link_title;
+					$title = $this->encodeAttribute($title);
+					$attr .= " title=\"$title\"";
+				}
+				
+				$attr = str_replace("%%", $num, $attr);
+				$node_id = $this->encodeAttribute($node_id);
+				
+				return
+					"<sup id=\"fnref:$node_id\">".
+					"<a href=\"#fn:$node_id\"$attr>$num</a>".
+					"</sup>";
+			}
+			
+			return "[^".$matches[1]."]";
+		}
+
+
+		protected function doTOC($text){
+		#    
+		# Adds TOC support by including the following on a single line:
+		#    
+		# [TOC]
+		#    
+		# TOC Requirements:
+		#     * Only headings 2-6
+		#     * Headings must have an ID
+		#     * Builds TOC with headings _after_ the [TOC] tag
+		  
+			if (preg_match ('/\[TOC\]/m', $text, $i, PREG_OFFSET_CAPTURE)) {
+				$toc = '';
+				preg_match_all ('/<h([2-6]) id="([^"]+)">(.*?)<\/h\1>/i', $text, $h, PREG_SET_ORDER, $i[0][1]);
+				foreach ($h as &$m){
+					$toc .= str_repeat ("\t", (int) $m[1]-2)."*\t [${m[3]}](#${m[2]})\n";
+				}
+				$text = preg_replace ('/\[TOC\]/m', Markdown($toc), $text);
+			}
+			return trim ($text, "\n");
+		}
+
+
+		protected function doHeaders($text){
+		#
+		# Redefined to add id attribute support.
+		#
+			# Setext-style headers:
+			#	  Header 1  {#header1}
+			#	  ========
+			#  
+			#	  Header 2  {#header2}
+			#	  --------
+			#
+			$text = preg_replace_callback(
+				'{
+					(^.+?)								# $1: Header text
+					(?:[ ]+\{\#([^\}#.]*)\})?	# $2: Id attribute
+					[ ]*\n(=+|-+)[ ]*\n+				# $3: Header footer
+				}mx',
+				array($this, 'doHeaders_callback_setext'), $text);
+
+			# atx-style headers:
+			#	# Header 1        {#header1}
+			#	## Header 2       {#header2}
+			#	## Header 2 with closing hashes ##  {#header3}
+			#	...
+			#	###### Header 6   {#header2}
+			#
+			$text = preg_replace_callback('{
+					^(\#{1,6})	# $1 = string of #\'s
+					[ ]*
+					(.+?)		# $2 = Header text
+					[ ]*
+					\#*			# optional closing #\'s (not counted)
+					(?:[ ]+\{\#([^\}#.]*)\})? # id attribute
+					[ ]*
+					\n+
+				}xm',
+				array($this, 'doHeaders_callback_atx'), $text);
+
+			return $text;
+		}
+
+		private function doHeaders_attr($attr, $text) {
+			$id = empty($attr) ? str_replace(' ', '-', $text) : $attr;
+			return " id=\"$id\"";
+		}
+
+		private function doHeaders_callback_setext($matches) {
+			if ($matches[3] == '-' && preg_match('{^- }', $matches[1]))
+				return $matches[0];
+			$level = $matches[3]{0} == '=' ? 1 : 2;
+			$attr  = $this->doHeaders_attr($id =& $matches[2], $matches[1]);
+			$block = "<h$level$attr>".$this->runSpanGamut($matches[1])."</h$level>";
+			return "\n" . $this->hashBlock($block) . "\n\n";
+		}
+
+		private function doHeaders_callback_atx($matches) {
+			$level = strlen($matches[1]);
+			$attr  = $this->doHeaders_attr($id =& $matches[3], $matches[2]);
+			$block = "<h$level$attr>".$this->runSpanGamut($matches[2])."</h$level>";
+			return "\n" . $this->hashBlock($block) . "\n\n";
+		}
+
+
+		protected function doTables($text) {
+		#
+		# Form HTML tables.
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'] - 1;
+			#
+			# Find tables with leading pipe.
+			#
+			#	| Header 1 | Header 2
+			#	| -------- | --------
+			#	| Cell 1   | Cell 2
+			#	| Cell 3   | Cell 4
+			#
+			$text = preg_replace_callback('
+				{
+					^							# Start of a line
+					[ ]{0,'.$less_than_tab.'}	# Allowed whitespace.
+					[|]							# Optional leading pipe (present)
+					(.+) \n						# $1: Header row (at least one pipe)
+					
+					[ ]{0,'.$less_than_tab.'}	# Allowed whitespace.
+					[|] ([ ]*[-:]+[-| :]*) \n	# $2: Header underline
+					
+					(							# $3: Cells
+						(?>
+							[ ]*				# Allowed whitespace.
+							[|] .* \n			# Row content.
+						)*
+					)
+					(?=\n|\Z)					# Stop at final double newline.
+				}xm',
+				array($this, 'doTable_leadingPipe_callback'), $text);
+			
+			#
+			# Find tables without leading pipe.
+			#
+			#	Header 1 | Header 2
+			#	-------- | --------
+			#	Cell 1   | Cell 2
+			#	Cell 3   | Cell 4
+			#
+			$text = preg_replace_callback('
+				{
+					^							# Start of a line
+					[ ]{0,'.$less_than_tab.'}	# Allowed whitespace.
+					(\S.*[|].*) \n				# $1: Header row (at least one pipe)
+					
+					[ ]{0,'.$less_than_tab.'}	# Allowed whitespace.
+					([-:]+[ ]*[|][-| :]*) \n	# $2: Header underline
+					
+					(							# $3: Cells
+						(?>
+							.* [|] .* \n		# Row content
+						)*
+					)
+					(?=\n|\Z)					# Stop at final double newline.
+				}xm',
+				array($this, 'doTable_callback'), $text);
+
+			return $text;
+		}
+
+		private function doTable_leadingPipe_callback($matches) {
+			$head		= $matches[1];
+			$underline	= $matches[2];
+			$content	= $matches[3];
+			
+			# Remove leading pipe for each row.
+			$content	= preg_replace('/^ *[|]/m', '', $content);
+			
+			return $this->doTable_callback(array($matches[0], $head, $underline, $content));
+		}
+
+		private function doTable_callback($matches) {
+			$head		= $matches[1];
+			$underline	= $matches[2];
+			$content	= $matches[3];
+
+			# Remove any tailing pipes for each line.
+			$head		= preg_replace('/[|] *$/m', '', $head);
+			$underline	= preg_replace('/[|] *$/m', '', $underline);
+			$content	= preg_replace('/[|] *$/m', '', $content);
+			
+			# Reading alignement from header underline.
+			$separators	= preg_split('/ *[|] */', $underline);
+			foreach ($separators as $n => $s) {
+				if (preg_match('/^ *-+: *$/', $s)){
+					$attr[$n] = ' align="right"';
+				}else if (preg_match('/^ *:-+: *$/', $s)){
+					$attr[$n] = ' align="center"';
+				}else if (preg_match('/^ *:-+ *$/', $s)){
+					$attr[$n] = ' align="left"';
+				}else{
+					$attr[$n] = '';
+				}
+			}
+			
+			# Parsing span elements, including code spans, character escapes, 
+			# and inline HTML tags, so that pipes inside those gets ignored.
+			$head		= $this->parseSpan($head);
+			$headers	= preg_split('/ *[|] */', $head);
+			$col_count	= count($headers);
+			
+			# Write column headers.
+			$text = "<table>\n";
+			$text .= "<thead>\n";
+			$text .= "<tr>\n";
+			foreach ($headers as $n => $header){
+				$text .= "  <th$attr[$n]>".$this->runSpanGamut(trim($header))."</th>\n";
+			}
+			$text .= "</tr>\n";
+			$text .= "</thead>\n";
+			
+			# Split content by row.
+			$rows = explode("\n", trim($content, "\n"));
+			
+			$text .= "<tbody>\n";
+			foreach ($rows as $row) {
+				# Parsing span elements, including code spans, character escapes, 
+				# and inline HTML tags, so that pipes inside those gets ignored.
+				$row = $this->parseSpan($row);
+				
+				# Split row by cell.
+				$row_cells = preg_split('/ *[|] */', $row, $col_count);
+				$row_cells = array_pad($row_cells, $col_count, '');
+				
+				$text .= "<tr>\n";
+				foreach ($row_cells as $n => $cell)
+					$text .= "  <td$attr[$n]>".$this->runSpanGamut(trim($cell))."</td>\n";
+				$text .= "</tr>\n";
+			}
+			$text .= "</tbody>\n";
+			$text .= "</table>";
+			
+			return $this->hashBlock($text) . "\n";
+		}
+
+
+		protected function doDefLists($text){
+		#
+		# Form HTML definition lists.
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'] - 1;
+
+			# Re-usable pattern to match any entire dl list:
+			$whole_list_re = '(?>
+				(								# $1 = whole list
+				  (								# $2
+					[ ]{0,'.$less_than_tab.'}
+					((?>.*\S.*\n)+)				# $3 = defined term
+					\n?
+					[ ]{0,'.$less_than_tab.'}:[ ]+ # colon starting definition
+				  )
+				  (?s:.+?)
+				  (								# $4
+					  \z
+					|
+					  \n{2,}
+					  (?=\S)
+					  (?!						# Negative lookahead for another term
+						[ ]{0,'.$less_than_tab.'}
+						(?: \S.*\n )+?			# defined term
+						\n?
+						[ ]{0,'.$less_than_tab.'}:[ ]+ # colon starting definition
+					  )
+					  (?!						# Negative lookahead for another definition
+						[ ]{0,'.$less_than_tab.'}:[ ]+ # colon starting definition
+					  )
+				  )
+				)
+			)'; // mx
+
+			$text = preg_replace_callback('{
+					(?>\A\n?|(?<=\n\n))
+					'.$whole_list_re.'
+				}mx',
+				array($this, 'doDefLists_callback'), $text);
+
+			return $text;
+		}
+
+		private function doDefLists_callback($matches) {
+			# Re-usable patterns to match list item bullets and number markers:
+			$list = $matches[1];
+			
+			# Turn double returns into triple returns, so that we can make a
+			# paragraph for the last item in a list, if necessary:
+			$result = trim($this->processDefListItems($list));
+			$result = "<dl>\n" . $result . "\n</dl>";
+			return $this->hashBlock($result) . "\n\n";
+		}
+
+		private function processDefListItems($list_str) {
+		#
+		#	Process the contents of a single definition list, splitting it
+		#	into individual term and definition list items.
+		#
+			$less_than_tab = $this->config['TAB_WIDTH'] - 1;
+			
+			# trim trailing blank lines:
+			$list_str = preg_replace("/\n{2,}\\z/", "\n", $list_str);
+
+			# Process definition terms.
+			$list_str = preg_replace_callback('{
+				(?>\A\n?|\n\n+)					# leading line
+				(								# definition terms = $1
+					[ ]{0,'.$less_than_tab.'}	# leading whitespace
+					(?![:][ ]|[ ])				# negative lookahead for a definition 
+												#   mark (colon) or more whitespace.
+					(?> \S.* \n)+?				# actual term (not whitespace).	
+				)			
+				(?=\n?[ ]{0,3}:[ ])				# lookahead for following line feed 
+												#   with a definition mark.
+				}xm',
+				array($this, 'processDefListItems_callback_dt'), $list_str);
+
+			# Process actual definitions.
+			$list_str = preg_replace_callback('{
+				\n(\n+)?						# leading line = $1
+				(								# marker space = $2
+					[ ]{0,'.$less_than_tab.'}	# whitespace before colon
+					[:][ ]+						# definition mark (colon)
+				)
+				((?s:.+?))						# definition text = $3
+				(?= \n+ 						# stop at next definition mark,
+					(?:							# next term or end of text
+						[ ]{0,'.$less_than_tab.'} [:][ ]	|
+						<dt> | \z
+					)						
+				)					
+				}xm',
+				array($this, 'processDefListItems_callback_dd'), $list_str);
+
+			return $list_str;
+		}
+
+		private function processDefListItems_callback_dt($matches) {
+			$terms = explode("\n", trim($matches[1]));
+			$text = '';
+			foreach ($terms as $term) {
+				$term = $this->runSpanGamut(trim($term));
+				$text .= "\n<dt>" . $term . "</dt>";
+			}
+			return $text . "\n";
+		}
+
+		private function processDefListItems_callback_dd($matches) {
+			$leading_line	= $matches[1];
+			$marker_space	= $matches[2];
+			$def			= $matches[3];
+
+			if ($leading_line || preg_match('/\n{2,}/', $def)) {
+				# Replace marker with the appropriate whitespace indentation
+				$def = str_repeat(' ', strlen($marker_space)) . $def;
+				$def = $this->runBlockGamut($this->outdent($def . "\n\n"));
+				$def = "\n". $def ."\n";
+			}
+			else {
+				$def = rtrim($def);
+				$def = $this->runSpanGamut($this->outdent($def));
+			}
+
+			return "\n<dd>" . $def . "</dd>\n";
+		}
+
+
+		protected function doDisplayMath($text) {
+		#
+		# Wrap text between \[ and \] in display math tags.
+		#
+			$text = preg_replace_callback('{
+			^\\\\         # line starts with a single backslash (double escaping)
+			\[            # followed by a square bracket
+			(.+)          # then the actual LaTeX code
+			\\\\          # followed by another backslash
+			\]            # and closing bracket
+			\s*$          # and maybe some whitespace before the end of the line
+			}mx',
+			array($this, 'doDisplayMath_callback'), $text);
+
+			return $text;
+		}
+
+		private function doDisplayMath_callback($matches) {
+			$texblock = $matches[1];
+			# $texblock = htmlspecialchars(trim($texblock), ENT_NOQUOTES);
+			$texblock = trim($texblock);
+			if ($this->config['MATH_TYPE'] == "mathjax") {
+				$texblock = "<span class=\"MathJax_Preview\">[$texblock]</span><script type=\"math/tex; mode=display\">$texblock</script>";
+			} else {
+			  $texblock = "<div class=\"math\">$texblock</div>";
+			}
+			return "\n\n".$this->hashBlock($texblock)."\n\n";
+		}
+
+
+		protected function doFootnotes($text) {
+			#
+			# Replace footnote references in $text [^id] with a special text-token 
+			# which will be replaced by the actual footnote marker in appendFootnotes.
+			#
+			return (!$this->in_anchor) ? preg_replace('{\[\^(.+?)\]}', "F\x1Afn:\\1\x1A:", $text) : $text;
+		}
+
+
+		protected function doAbbreviations($text) {
+		#
+		# Find defined abbreviations in text and wrap them in <abbr> elements.
+		#
+			if ($this->abbr_word_re) {
+				// cannot use the /x modifier because abbr_word_re may 
+				// contain significant spaces:
+				$text = preg_replace_callback('{'.
+					'(?<![\w\x1A])'.
+					'(?:'.$this->abbr_word_re.')'.
+					'(?![\w\x1A])'.
+					'}', 
+					array($this, 'doAbbreviations_callback'), $text);
+			}
+			return $text;
+		}
+
+		private function doAbbreviations_callback($matches) {
+			$abbr = $matches[0];
+			if (isset($this->abbr_desciptions[$abbr])) {
+				$desc = $this->abbr_desciptions[$abbr];
+				if (empty($desc)) {
+					return $this->hashPart("<abbr>$abbr</abbr>");
+				} else {
+					$desc = $this->encodeAttribute($desc);
+					return $this->hashPart("<abbr title=\"$desc\">$abbr</abbr>");
+				}
+			} else {
+				return $matches[0];
+			}
+		}
+	}
 }
 ?>
